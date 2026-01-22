@@ -1,4 +1,4 @@
 python-telegram-bot==20.7
-yt-dlp==2024.1.7
-aiohttp==3.9.1
-certifi==2023.11.17
+yt-dlp
+aiohttp
+certifi
