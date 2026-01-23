@@ -428,16 +428,25 @@ def main() -> None:
     queue_thread = Thread(target=process_queue_worker, args=(updater,), daemon=True)
     queue_thread.start()
     
+    # Error handler
+    def error_handler(update, context):
+        logger.error(f"Update {update} caused error {context.error}")
+    
+    dispatcher.add_error_handler(error_handler)
+    
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("admin", admin_panel))
     dispatcher.add_handler(CallbackQueryHandler(language_callback, pattern='^lang_'))
-    dispatcher.add_handler(CallbackQueryHandler(check_subscription_callback, pattern='^check_subscription$'))
+    dispatcher.add_handler(CallbackQueryHandler(check_subscription_callback, pattern='^check_subscription
+
+if __name__ == '__main__':
+    main()))
     dispatcher.add_handler(CallbackQueryHandler(admin_callback, pattern='^admin_'))
     dispatcher.add_handler(CallbackQueryHandler(admin_callback, pattern='^remove_ch_'))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
     
     logger.info("Bot ishga tushdi!")
-    updater.start_polling()
+    updater.start_polling(drop_pending_updates=True)
     updater.idle()
 
 if __name__ == '__main__':
