@@ -1,10 +1,12 @@
 import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import yt_dlp
-import asyncio
 from typing import Optional
+from queue import Queue
+from threading import Thread
 
 # Logging sozlash
 logging.basicConfig(
@@ -12,6 +14,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# NAVBAT TIZIMI - Global Queue
+download_queue = Queue(maxsize=100)  # Max 100 ta task navbatda
+active_downloads = 0
+MAX_CONCURRENT_DOWNLOADS = 3  # Bir vaqtda max 3 ta video yuklanadi
 
 # Majburiy kanallar
 REQUIRED_CHANNELS = [
@@ -30,12 +37,14 @@ TRANSLATIONS = {
         'subscribe_button': "✅ Obuna bo'ldim",
         'subscribe_first': "📢 Botdan foydalanish uchun avval kanallarga obuna bo'ling!",
         'downloading': "⬇️ Video yuklanmoqda... Iltimos kuting.",
+        'in_queue': "⏳ Navbatda: {position}-o'rinda. Taxminan {time} daqiqa kutish.",
         'processing': "⚙️ Video qayta ishlanmoqda...",
         'sending': "📤 Video yuborilmoqda...",
         'success': "✅ Video muvaffaqiyatli yuklandi!",
         'error': "❌ Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring yoki boshqa link yuboring.",
         'invalid_link': "❌ Noto'g'ri link. Iltimos, to'g'ri video linkini yuboring.",
         'file_too_large': "❌ Video hajmi juda katta (50MB dan oshadi). Iltimos, boshqa video tanlang.",
+        'queue_full': "⚠️ Navbat to'lgan. Iltimos, biroz kutib qaytadan urinib ko'ring.",
         'thanks_subscribe': "✅ Rahmat! Endi video linkini yuboring.",
         'channel_name': "Kanal:",
         'uzbek': "🇺🇿 O'zbek tili",
@@ -51,12 +60,14 @@ TRANSLATIONS = {
         'subscribe_button': "✅ Я подписался",
         'subscribe_first': "📢 Подпишитесь на каналы, чтобы использовать бот!",
         'downloading': "⬇️ Загрузка видео... Пожалуйста, подождите.",
+        'in_queue': "⏳ В очереди: {position} место. Примерно {time} минут ожидания.",
         'processing': "⚙️ Обработка видео...",
         'sending': "📤 Отправка видео...",
         'success': "✅ Видео успешно загружено!",
         'error': "❌ Произошла ошибка. Попробуйте еще раз или отправьте другую ссылку.",
         'invalid_link': "❌ Неверная ссылка. Пожалуйста, отправьте правильную ссылку на видео.",
         'file_too_large': "❌ Видео слишком большое (более 50MB). Пожалуйста, выберите другое видео.",
+        'queue_full': "⚠️ Очередь заполнена. Пожалуйста, подождите и попробуйте позже.",
         'thanks_subscribe': "✅ Спасибо! Теперь отправьте ссылку на видео.",
         'channel_name': "Канал:",
         'uzbek': "🇺🇿 O'zbek tili",
@@ -72,12 +83,14 @@ TRANSLATIONS = {
         'subscribe_button': "✅ I subscribed",
         'subscribe_first': "📢 Subscribe to the channels to use the bot!",
         'downloading': "⬇️ Downloading video... Please wait.",
+        'in_queue': "⏳ In queue: position {position}. Approximately {time} minutes wait.",
         'processing': "⚙️ Processing video...",
         'sending': "📤 Sending video...",
         'success': "✅ Video downloaded successfully!",
         'error': "❌ An error occurred. Please try again or send another link.",
         'invalid_link': "❌ Invalid link. Please send a valid video link.",
         'file_too_large': "❌ Video is too large (over 50MB). Please choose another video.",
+        'queue_full': "⚠️ Queue is full. Please wait and try again later.",
         'thanks_subscribe': "✅ Thanks! Now send the video link.",
         'channel_name': "Channel:",
         'uzbek': "🇺🇿 O'zbek tili",
@@ -86,13 +99,13 @@ TRANSLATIONS = {
     }
 }
 
-# Foydalanuvchi tilini saqlash
 user_languages = {}
 
-def get_text(user_id: int, key: str) -> str:
+def get_text(user_id: int, key: str, **kwargs) -> str:
     """Foydalanuvchi tili bo'yicha matnni qaytaradi"""
     lang = user_languages.get(user_id, 'uz')
-    return TRANSLATIONS[lang].get(key, TRANSLATIONS['uz'][key])
+    text = TRANSLATIONS[lang].get(key, TRANSLATIONS['uz'][key])
+    return text.format(**kwargs) if kwargs else text
 
 async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Foydalanuvchi kanalga obuna bo'lganligini tekshiradi"""
@@ -111,9 +124,6 @@ async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start buyrug'i"""
-    user_id = update.effective_user.id
-    
-    # Til tanlash klaviaturasi
     keyboard = [
         [InlineKeyboardButton(TRANSLATIONS['uz']['uzbek'], callback_data='lang_uz')],
         [InlineKeyboardButton(TRANSLATIONS['ru']['russian'], callback_data='lang_ru')],
@@ -145,13 +155,11 @@ async def show_subscription_message(update: Update, context: ContextTypes.DEFAUL
     
     message = get_text(user_id, 'not_subscribed')
     
-    # Kanallar ro'yxati
     for i, channel in enumerate(REQUIRED_CHANNELS, 1):
         message += f"{i}. [{channel['name']}]({channel['url']})\n"
     
     message += f"\n{get_text(user_id, 'subscribe_first')}"
     
-    # "Obuna bo'ldim" tugmasi
     keyboard = [[InlineKeyboardButton(
         get_text(user_id, 'subscribe_button'), 
         callback_data='check_subscription'
@@ -202,31 +210,28 @@ async def download_video(url: str) -> Optional[str]:
         logger.error(f"Video yuklab olishda xatolik: {e}")
         return None
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Xabarlarni qayta ishlash"""
-    user_id = update.effective_user.id
-    text = update.message.text
+def process_queue():
+    """Navbatdagi videolarni qayta ishlash (Background thread)"""
+    global active_downloads
     
-    # Til tanlanganligini tekshirish
-    if user_id not in user_languages:
-        user_languages[user_id] = 'uz'
-    
-    # Link ekanligini tekshirish
-    if not text.startswith(('http://', 'https://')):
-        await update.message.reply_text(get_text(user_id, 'invalid_link'))
-        return
-    
-    # Obuna tekshirish
-    if not await check_subscription(update, context):
-        await show_subscription_message(update, context)
-        return
-    
-    # Video yuklab olish
-    status_msg = await update.message.reply_text(get_text(user_id, 'downloading'))
+    while True:
+        if not download_queue.empty() and active_downloads < MAX_CONCURRENT_DOWNLOADS:
+            task = download_queue.get()
+            active_downloads += 1
+            
+            # Taskni ishga tushirish
+            asyncio.run(process_download_task(task))
+            
+            active_downloads -= 1
+            download_queue.task_done()
+
+async def process_download_task(task):
+    """Bitta video yuklab olish taskini bajarish"""
+    update, context, url, status_msg, user_id = task
     
     try:
-        # Yuklab olish
-        video_path = await download_video(text)
+        # Video yuklab olish
+        video_path = await download_video(url)
         
         if not video_path:
             await status_msg.edit_text(get_text(user_id, 'error'))
@@ -234,7 +239,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Fayl hajmini tekshirish
         file_size = os.path.getsize(video_path)
-        if file_size > 50 * 1024 * 1024:  # 50MB
+        if file_size > 50 * 1024 * 1024:
             os.remove(video_path)
             await status_msg.edit_text(get_text(user_id, 'file_too_large'))
             return
@@ -249,7 +254,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 supports_streaming=True
             )
         
-        # Faylni o'chirish
         os.remove(video_path)
         await status_msg.delete()
         
@@ -257,28 +261,64 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error(f"Xatolik: {e}")
         await status_msg.edit_text(get_text(user_id, 'error'))
 
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Xabarlarni qayta ishlash"""
+    user_id = update.effective_user.id
+    text = update.message.text
+    
+    if user_id not in user_languages:
+        user_languages[user_id] = 'uz'
+    
+    if not text.startswith(('http://', 'https://')):
+        await update.message.reply_text(get_text(user_id, 'invalid_link'))
+        return
+    
+    if not await check_subscription(update, context):
+        await show_subscription_message(update, context)
+        return
+    
+    # Navbat to'lganligini tekshirish
+    if download_queue.full():
+        await update.message.reply_text(get_text(user_id, 'queue_full'))
+        return
+    
+    # Navbat holatini ko'rsatish
+    queue_size = download_queue.qsize()
+    if queue_size > 0:
+        wait_time = (queue_size + 1) * 2  # Har bir video ~2 daqiqa
+        status_msg = await update.message.reply_text(
+            get_text(user_id, 'in_queue', position=queue_size + 1, time=wait_time)
+        )
+    else:
+        status_msg = await update.message.reply_text(get_text(user_id, 'downloading'))
+    
+    # Navbatga qo'shish
+    task = (update, context, text, status_msg, user_id)
+    download_queue.put(task)
+    
+    logger.info(f"Video navbatga qo'shildi. Navbat hajmi: {download_queue.qsize()}")
+
 def main() -> None:
     """Botni ishga tushirish"""
-    # Downloads papkasini yaratish
     os.makedirs('downloads', exist_ok=True)
     
-    # Bot tokenini olish
     token = os.environ.get('BOT_TOKEN')
     if not token:
         logger.error("BOT_TOKEN topilmadi!")
         return
     
-    # Application yaratish
+    # Background queue processor thread
+    queue_thread = Thread(target=process_queue, daemon=True)
+    queue_thread.start()
+    
     application = Application.builder().token(token).build()
     
-    # Handlerlarni qo'shish
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(language_callback, pattern='^lang_'))
     application.add_handler(CallbackQueryHandler(check_subscription_callback, pattern='^check_subscription$'))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Botni ishga tushirish
-    logger.info("Bot ishga tushdi!")
+    logger.info("Bot ishga tushdi! Navbat tizimi faol.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
