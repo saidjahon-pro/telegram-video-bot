@@ -319,7 +319,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     logger.info("Bot ishga tushdi! Navbat tizimi faol.")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
