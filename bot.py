@@ -13,10 +13,8 @@ import time
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Admin ID
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 
-# Statistics
 stats = {
     'total_users': set(),
     'total_downloads': 0,
@@ -25,12 +23,10 @@ stats = {
     'last_reset': datetime.now().date()
 }
 
-# Queue
 download_queue = Queue(maxsize=100)
 active_downloads = 0
 MAX_CONCURRENT_DOWNLOADS = 3
 
-# Channels
 REQUIRED_CHANNELS = [
     {"name": "Muallim GPT", "username": "@muallim_gpt", "url": "https://t.me/muallim_gpt"},
     {"name": "Meta Bilim", "username": "@meta_bilim", "url": "https://t.me/meta_bilim"}
@@ -40,17 +36,17 @@ def load_channels():
     global REQUIRED_CHANNELS
     try:
         if os.path.exists('channels.json'):
-            with open('channels.json', 'r') as f:
+            with open('channels.json', 'r', encoding='utf-8') as f:
                 REQUIRED_CHANNELS = json.load(f)
     except:
         pass
 
 def save_channels():
     try:
-        with open('channels.json', 'w') as f:
-            json.dump(REQUIRED_CHANNELS, f, indent=2)
+        with open('channels.json', 'w', encoding='utf-8') as f:
+            json.dump(REQUIRED_CHANNELS, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        logger.error(f"Save channels error: {e}")
+        logger.error(f"Save error: {e}")
 
 def reset_daily_stats():
     today = datetime.now().date()
@@ -61,12 +57,12 @@ def reset_daily_stats():
 
 TRANSLATIONS = {
     'uz': {
-        'welcome': "🎬 Video Yuklovchi Botga xush kelibsiz!\n\nInstagram, Facebook, TikTok, YouTube videolarini yuklab olishingiz mumkin.\n\n📌 Tilni tanlang:",
-        'send_link': "📎 Video linkini yuboring.\n\n✅ Qo'llab-quvvatlanadigan:\n• Instagram • Facebook • TikTok\n• YouTube • Pinterest • Twitter/X",
+        'welcome': "🎬 Video Yuklovchi Bot\n\nInstagram, TikTok, YouTube va boshqa platformalardan video yuklab oling.\n\nTilni tanlang:",
+        'send_link': "📎 Video linkini yuboring\n\nQollab-quvvatlanadigan:\nInstagram, Facebook, TikTok, YouTube, Pinterest, Twitter",
         'not_subscribed': "❌ Kanalga obuna bo'lmadingiz:\n\n",
         'subscribe_button': "✅ Obuna bo'ldim",
         'downloading': "⬇️ Yuklanmoqda...",
-        'in_queue': "⏳ Navbat: {position}. ~{time} daq.",
+        'in_queue': "⏳ Navbat: {position}. Kutish: ~{time} daq.",
         'success': "✅ Tayyor!",
         'error': "❌ Xatolik.",
         'invalid_link': "❌ Noto'g'ri link.",
@@ -75,12 +71,12 @@ TRANSLATIONS = {
         'english': "🇬🇧 English"
     },
     'ru': {
-        'welcome': "🎬 Добро пожаловать!\n\nСкачивайте видео.\n\n📌 Выберите язык:",
-        'send_link': "📎 Отправьте ссылку.\n\n✅ Поддерживается:\n• Instagram • Facebook • TikTok\n• YouTube • Pinterest • Twitter/X",
+        'welcome': "🎬 Бот для скачивания видео\n\nСкачивайте с Instagram, TikTok, YouTube.\n\nВыберите язык:",
+        'send_link': "📎 Отправьте ссылку\n\nПоддерживается:\nInstagram, Facebook, TikTok, YouTube, Pinterest, Twitter",
         'not_subscribed': "❌ Не подписаны:\n\n",
         'subscribe_button': "✅ Подписался",
         'downloading': "⬇️ Загрузка...",
-        'in_queue': "⏳ Очередь: {position}. ~{time} мин.",
+        'in_queue': "⏳ Очередь: {position}. Ожидание: ~{time} мин.",
         'success': "✅ Готово!",
         'error': "❌ Ошибка.",
         'invalid_link': "❌ Неверная ссылка.",
@@ -89,12 +85,12 @@ TRANSLATIONS = {
         'english': "🇬🇧 English"
     },
     'en': {
-        'welcome': "🎬 Welcome!\n\nDownload videos.\n\n📌 Choose language:",
-        'send_link': "📎 Send link.\n\n✅ Supported:\n• Instagram • Facebook • TikTok\n• YouTube • Pinterest • Twitter/X",
+        'welcome': "🎬 Video Downloader Bot\n\nDownload from Instagram, TikTok, YouTube.\n\nChoose language:",
+        'send_link': "📎 Send link\n\nSupported:\nInstagram, Facebook, TikTok, YouTube, Pinterest, Twitter",
         'not_subscribed': "❌ Not subscribed:\n\n",
         'subscribe_button': "✅ Subscribed",
         'downloading': "⬇️ Downloading...",
-        'in_queue': "⏳ Queue: {position}. ~{time} min.",
+        'in_queue': "⏳ Queue: {position}. Wait: ~{time} min.",
         'success': "✅ Done!",
         'error': "❌ Error.",
         'invalid_link': "❌ Invalid link.",
@@ -107,47 +103,34 @@ TRANSLATIONS = {
 user_languages = {}
 user_data = {}
 
-def get_text(user_id: int, key: str, **kwargs) -> str:
+def get_text(user_id, key, **kwargs):
     lang = user_languages.get(user_id, 'uz')
     text = TRANSLATIONS[lang].get(key, TRANSLATIONS['uz'][key])
     return text.format(**kwargs) if kwargs else text
 
-def is_admin(user_id: int) -> bool:
+def is_admin(user_id):
     return user_id == ADMIN_ID
 
-def admin_panel(update: Update, context: CallbackContext) -> None:
+def admin_panel(update, context):
     if not is_admin(update.effective_user.id):
-        update.message.reply_text("❌ Sizda admin huquqi yo'q!")
+        update.message.reply_text("❌ Ruxsat yo'q!")
         return
     
     reset_daily_stats()
     
-    text = f"""👑 ADMIN PANEL
-
-📊 Statistika:
-├ Jami foydalanuvchilar: {len(stats['total_users'])}
-├ Bugungi faol: {len(stats['active_users_today'])}
-├ Jami yuklanganlar: {stats['total_downloads']}
-└ Bugungi yuklanganlar: {stats['today_downloads']}
-
-⚙️ Tizim:
-├ Navbat: {download_queue.qsize()}/100
-├ Faol yuklashlar: {active_downloads}/{MAX_CONCURRENT_DOWNLOADS}
-└ Majburiy kanallar: {len(REQUIRED_CHANNELS)}
-
-📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"""
+    text = f"👑 ADMIN PANEL\n\n📊 Statistika:\nJami: {len(stats['total_users'])}\nBugungi: {len(stats['active_users_today'])}\nYuklanganlar: {stats['total_downloads']}\nBugungi: {stats['today_downloads']}\n\n⚙️ Tizim:\nNavbat: {download_queue.qsize()}/100\nFaol: {active_downloads}/{MAX_CONCURRENT_DOWNLOADS}\nKanallar: {len(REQUIRED_CHANNELS)}\n\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     
     keyboard = [
-        [InlineKeyboardButton("📢 Xabar yuborish", callback_data='admin_broadcast')],
+        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')],
         [InlineKeyboardButton("➕ Kanal qo'shish", callback_data='admin_add_channel')],
         [InlineKeyboardButton("➖ Kanal o'chirish", callback_data='admin_remove_channel')],
-        [InlineKeyboardButton("📋 Kanallar ro'yxati", callback_data='admin_list_channels')],
+        [InlineKeyboardButton("📋 Kanallar", callback_data='admin_list_channels')],
         [InlineKeyboardButton("🔄 Yangilash", callback_data='admin_refresh')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(text, reply_markup=reply_markup)
 
-def admin_callback(update: Update, context: CallbackContext) -> None:
+def admin_callback(update, context):
     query = update.callback_query
     query.answer()
     
@@ -159,23 +142,10 @@ def admin_callback(update: Update, context: CallbackContext) -> None:
     
     if data == 'admin_refresh':
         reset_daily_stats()
-        text = f"""👑 ADMIN PANEL
-
-📊 Statistika:
-├ Jami: {len(stats['total_users'])}
-├ Bugungi: {len(stats['active_users_today'])}
-├ Yuklanganlar: {stats['total_downloads']}
-└ Bugungi: {stats['today_downloads']}
-
-⚙️ Tizim:
-├ Navbat: {download_queue.qsize()}/100
-├ Faol: {active_downloads}/{MAX_CONCURRENT_DOWNLOADS}
-└ Kanallar: {len(REQUIRED_CHANNELS)}
-
-📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"""
+        text = f"👑 ADMIN PANEL\n\n📊 Statistika:\nJami: {len(stats['total_users'])}\nBugungi: {len(stats['active_users_today'])}\nYuklanganlar: {stats['total_downloads']}\nBugungi: {stats['today_downloads']}\n\n⚙️ Tizim:\nNavbat: {download_queue.qsize()}/100\nFaol: {active_downloads}/{MAX_CONCURRENT_DOWNLOADS}\nKanallar: {len(REQUIRED_CHANNELS)}\n\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         
         keyboard = [
-            [InlineKeyboardButton("📢 Xabar yuborish", callback_data='admin_broadcast')],
+            [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')],
             [InlineKeyboardButton("➕ Kanal qo'shish", callback_data='admin_add_channel')],
             [InlineKeyboardButton("➖ Kanal o'chirish", callback_data='admin_remove_channel')],
             [InlineKeyboardButton("📋 Kanallar", callback_data='admin_list_channels')],
@@ -185,19 +155,17 @@ def admin_callback(update: Update, context: CallbackContext) -> None:
         query.edit_message_text(text, reply_markup=reply_markup)
     
     elif data == 'admin_broadcast':
-        query.edit_message_text("📢 Keyingi xabaringizni yuboring, u barcha foydalanuvchilarga yuboriladi.")
+        query.edit_message_text("📢 Keyingi xabaringizni yuboring")
         user_data[query.from_user.id] = {'waiting_broadcast': True}
     
     elif data == 'admin_list_channels':
-        text = "📋 Majburiy kanallar:\n\n"
+        text = "📋 Kanallar:\n\n"
         for i, ch in enumerate(REQUIRED_CHANNELS, 1):
             text += f"{i}. {ch['name']} - {ch['username']}\n"
         query.edit_message_text(text)
     
     elif data == 'admin_add_channel':
-        query.edit_message_text(
-            "➕ Kanal qo'shish\n\nFormat:\nNom | @username | https://t.me/username\n\nMisol:\nYangi Kanal | @yangi | https://t.me/yangi"
-        )
+        query.edit_message_text("➕ Format:\nNom | @username | https://t.me/username")
         user_data[query.from_user.id] = {'waiting_add_channel': True}
     
     elif data == 'admin_remove_channel':
@@ -211,7 +179,7 @@ def admin_callback(update: Update, context: CallbackContext) -> None:
         keyboard.append([InlineKeyboardButton("◀️ Orqaga", callback_data='admin_refresh')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text("➖ O'chirish uchun tanlang:", reply_markup=reply_markup)
+        query.edit_message_text("➖ Tanlang:", reply_markup=reply_markup)
     
     elif data.startswith('remove_ch_'):
         idx = int(data.split('_')[2])
@@ -220,19 +188,16 @@ def admin_callback(update: Update, context: CallbackContext) -> None:
             save_channels()
             query.answer(f"✅ {removed['name']} o'chirildi!", show_alert=True)
             admin_callback(update, context)
-        else:
-            query.answer("❌ Xatolik!", show_alert=True)
 
-def handle_admin_message(update: Update, context: CallbackContext) -> None:
+def handle_admin_message(update, context):
     if not is_admin(update.effective_user.id):
-        return
+        return False
     
     user_id = update.effective_user.id
     
     if user_data.get(user_id, {}).get('waiting_broadcast'):
         user_data[user_id] = {}
         text = update.message.text
-        
         update.message.reply_text("📤 Yuborilmoqda...")
         
         success = 0
@@ -244,7 +209,7 @@ def handle_admin_message(update: Update, context: CallbackContext) -> None:
             except:
                 failed += 1
         
-        update.message.reply_text(f"✅ Yuborildi!\n\n✓ Muvaffaqiyatli: {success}\n✗ Xatolik: {failed}")
+        update.message.reply_text(f"✅ Yuborildi!\n\nMuvaffaqiyatli: {success}\nXatolik: {failed}")
         return True
     
     if user_data.get(user_id, {}).get('waiting_add_channel'):
@@ -262,7 +227,6 @@ def handle_admin_message(update: Update, context: CallbackContext) -> None:
             
             REQUIRED_CHANNELS.append({"name": name, "username": username, "url": url})
             save_channels()
-            
             update.message.reply_text(f"✅ {name} qo'shildi!")
         except Exception as e:
             update.message.reply_text(f"❌ Xatolik: {e}")
@@ -270,7 +234,7 @@ def handle_admin_message(update: Update, context: CallbackContext) -> None:
     
     return False
 
-def check_subscription(update: Update, context: CallbackContext) -> bool:
+def check_subscription(update, context):
     user_id = update.effective_user.id
     for channel in REQUIRED_CHANNELS:
         try:
@@ -281,7 +245,7 @@ def check_subscription(update: Update, context: CallbackContext) -> bool:
             return False
     return True
 
-def start(update: Update, context: CallbackContext) -> None:
+def start(update, context):
     user_id = update.effective_user.id
     stats['total_users'].add(user_id)
     
@@ -293,7 +257,7 @@ def start(update: Update, context: CallbackContext) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(TRANSLATIONS['uz']['welcome'], reply_markup=reply_markup)
 
-def language_callback(update: Update, context: CallbackContext) -> None:
+def language_callback(update, context):
     query = update.callback_query
     query.answer()
     user_id = query.from_user.id
@@ -301,7 +265,7 @@ def language_callback(update: Update, context: CallbackContext) -> None:
     user_languages[user_id] = lang
     query.edit_message_text(text=get_text(user_id, 'send_link'))
 
-def show_subscription_message(update: Update, context: CallbackContext) -> None:
+def show_subscription_message(update, context):
     user_id = update.effective_user.id
     message = get_text(user_id, 'not_subscribed')
     for i, channel in enumerate(REQUIRED_CHANNELS, 1):
@@ -310,7 +274,7 @@ def show_subscription_message(update: Update, context: CallbackContext) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown', disable_web_page_preview=True)
 
-def check_subscription_callback(update: Update, context: CallbackContext) -> None:
+def check_subscription_callback(update, context):
     query = update.callback_query
     user_id = query.from_user.id
     query.answer()
@@ -319,7 +283,7 @@ def check_subscription_callback(update: Update, context: CallbackContext) -> Non
     else:
         query.answer("❌ Obuna bo'lmadingiz!", show_alert=True)
 
-def download_video(url: str) -> Optional[str]:
+def download_video(url):
     try:
         ydl_opts = {
             'format': 'best[filesize<50M]/best',
@@ -377,7 +341,7 @@ def process_download_task(task, context):
         except:
             pass
 
-def handle_message(update: Update, context: CallbackContext) -> None:
+def handle_message(update, context):
     user_id = update.effective_user.id
     
     if handle_admin_message(update, context):
@@ -396,7 +360,7 @@ def handle_message(update: Update, context: CallbackContext) -> None:
         return
     
     if download_queue.full():
-        update.message.reply_text("⚠️ Navbat to'lgan.")
+        update.message.reply_text("⚠️ Navbat to'lgan")
         return
     
     queue_size = download_queue.qsize()
@@ -409,7 +373,10 @@ def handle_message(update: Update, context: CallbackContext) -> None:
     task = (update, text, status_msg, user_id)
     download_queue.put(task)
 
-def main() -> None:
+def error_handler(update, context):
+    logger.error(f"Update {update} caused error {context.error}")
+
+def main():
     os.makedirs('downloads', exist_ok=True)
     load_channels()
     
@@ -424,23 +391,14 @@ def main() -> None:
     updater = Updater(token=token, use_context=True)
     dispatcher = updater.dispatcher
     
-    # Start queue worker
     queue_thread = Thread(target=process_queue_worker, args=(updater,), daemon=True)
     queue_thread.start()
     
-    # Error handler
-    def error_handler(update, context):
-        logger.error(f"Update {update} caused error {context.error}")
-    
     dispatcher.add_error_handler(error_handler)
-    
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("admin", admin_panel))
     dispatcher.add_handler(CallbackQueryHandler(language_callback, pattern='^lang_'))
-    dispatcher.add_handler(CallbackQueryHandler(check_subscription_callback, pattern='^check_subscription
-
-if __name__ == '__main__':
-    main()))
+    dispatcher.add_handler(CallbackQueryHandler(check_subscription_callback, pattern='^check_subscription$'))
     dispatcher.add_handler(CallbackQueryHandler(admin_callback, pattern='^admin_'))
     dispatcher.add_handler(CallbackQueryHandler(admin_callback, pattern='^remove_ch_'))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
