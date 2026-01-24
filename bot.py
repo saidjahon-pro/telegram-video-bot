@@ -283,18 +283,83 @@ def check_subscription_callback(update, context):
     else:
         query.answer("❌ Obuna bo'lmadingiz!", show_alert=True)
 
+import requests
+import re
+import time
+
+def download_with_snapsave(url):
+    """SnapSave API orqali video yuklab olish"""
+    try:
+        api_url = "https://snapsave.app/api/ajaxSearch"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        
+        data = {
+            'q': url,
+            'lang': 'en'
+        }
+        
+        response = requests.post(api_url, headers=headers, data=data, timeout=30)
+        
+        if response.status_code != 200:
+            return None
+            
+        result = response.json()
+        html = result.get('data', '')
+        
+        # Video linkni topish
+        video_urls = re.findall(r'href="(https?://[^"]+\.mp4[^"]*)"', html)
+        
+        if video_urls:
+            return video_urls[0]
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"SnapSave error: {e}")
+        return None
+
 def download_video(url):
     try:
-        ydl_opts = {
-            'format': 'best[filesize<50M]/best',
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            return filename
+        # Instagram, Facebook, TikTok uchun SnapSave
+        if any(domain in url for domain in ['instagram.com', 'instagr.am', 'facebook.com', 'fb.watch', 'tiktok.com']):
+            video_url = download_with_snapsave(url)
+            
+            if video_url:
+                response = requests.get(video_url, stream=True, timeout=60)
+                
+                if response.status_code != 200:
+                    return None
+                
+                filename = f"downloads/{int(time.time())}.mp4"
+                
+                with open(filename, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                
+                return filename
+            
+            return None
+        
+        # Boshqa platformalar uchun yt-dlp
+        else:
+            ydl_opts = {
+                'format': 'best',
+                'outtmpl': 'downloads/%(id)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+                return filename
+    
     except Exception as e:
         logger.error(f"Download error: {e}")
         return None
@@ -353,6 +418,18 @@ def handle_message(update, context):
     
     if not text.startswith(('http://', 'https://')):
         update.message.reply_text(get_text(user_id, 'invalid_link'))
+        return
+    
+    # Instagram bloklanishi
+    if 'instagram.com' in text or 'instagr.am' in text:
+        lang = user_languages.get(user_id, 'uz')
+        if lang == 'uz':
+            msg = "⚠️ Instagram videolarini yuklab olish vaqtincha ishlamayapti.\n\nIltimos, TikTok, YouTube yoki boshqa platformadan foydalaning."
+        elif lang == 'ru':
+            msg = "⚠️ Загрузка из Instagram временно недоступна.\n\nИспользуйте TikTok, YouTube или другие платформы."
+        else:
+            msg = "⚠️ Instagram downloads are temporarily unavailable.\n\nPlease use TikTok, YouTube or other platforms."
+        update.message.reply_text(msg)
         return
     
     if not check_subscription(update, context):
