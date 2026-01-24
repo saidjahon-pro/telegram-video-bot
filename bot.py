@@ -420,18 +420,6 @@ def handle_message(update, context):
         update.message.reply_text(get_text(user_id, 'invalid_link'))
         return
     
-    # Instagram bloklanishi
-    if 'instagram.com' in text or 'instagr.am' in text:
-        lang = user_languages.get(user_id, 'uz')
-        if lang == 'uz':
-            msg = "⚠️ Instagram videolarini yuklab olish vaqtincha ishlamayapti.\n\nIltimos, TikTok, YouTube yoki boshqa platformadan foydalaning."
-        elif lang == 'ru':
-            msg = "⚠️ Загрузка из Instagram временно недоступна.\n\nИспользуйте TikTok, YouTube или другие платформы."
-        else:
-            msg = "⚠️ Instagram downloads are temporarily unavailable.\n\nPlease use TikTok, YouTube or other platforms."
-        update.message.reply_text(msg)
-        return
-    
     if not check_subscription(update, context):
         show_subscription_message(update, context)
         return
